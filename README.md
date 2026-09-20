@@ -4,7 +4,7 @@ Venueflow is a TypeScript Event Booking System for organizers and customers. It 
 
 ## What is implemented
 
-- Public event browsing and a compact React booking dashboard.
+- Public event browsing, a compact React booking dashboard, and an Organizer console for creating and updating owned events.
 - Clerk JWT verification with server-side `CUSTOMER` and `ORGANIZER` roles.
 - Organizer event creation, listing, updates, booking visibility, and notification status.
 - Customer booking history and idempotent booking requests.
@@ -58,6 +58,8 @@ The baseline uses `workers.dev`; only production needs a custom domain. Two Work
 
 Money is stored as integer minor units. Event times are ISO-8601 UTC strings. Every booking requires an `Idempotency-Key`; `UNIQUE(customer_id, idempotency_key)` makes client retries return the original booking.
 
+Venueflow stores event timestamps in UTC, while its current organizer/customer UI intentionally displays and edits them in Indian Standard Time (`Asia/Kolkata`). This keeps API persistence unambiguous while matching the product's single-timezone operating context.
+
 The final production migration adds a database trigger that atomically validates event availability and increments `tickets_sold` during booking insertion. The invariant is:
 
 ```text
@@ -78,9 +80,15 @@ D1 and Cloudflare Queues cannot share one distributed transaction. The solution 
 
 Booking confirmations use `booking-confirmed/{bookingId}`. Event updates use `event-updated/{eventId}/{version}/{recipient}`. Benchmark addresses ending in `.invalid` are marked `SUPPRESSED_TEST`; normal recipients use the real Resend API.
 
+Customer-facing event updates are title, description, venue, start/end time, and status changes. Only these create an event-update outbox row and email existing ticket holders. Capacity, price, and currency changes remain auditable but do not trigger a notification because they do not alter a customer's confirmed booking.
+
 ### Scope boundaries
 
 This submission intentionally excludes payments, refunds, customer cancellations, reserved seating, ticket tiers, hard event deletion, and public organizer sign-up. Published events are cancelled through status updates to preserve audit history.
+
+### Organizer console
+
+The small frontend is a convenience layer over the same protected APIs used in the demo. It lists only the signed-in organizer's events and allows create/update operations. The Worker remains authoritative: it derives the role from D1 and checks event ownership for every write, so hiding booking controls for organizers is a usability measure rather than a security control.
 
 ## Local setup
 

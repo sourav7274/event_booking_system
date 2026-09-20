@@ -96,11 +96,13 @@ app.patch('/api/v1/organizer/events/:eventId', requireAuth, requireRole('ORGANIZ
   const values = changed.map(([, value]) => value);
   const outboxId = crypto.randomUUID();
   const version = event.version + 1;
-  await c.env.DB.batch([
-    c.env.DB.prepare(`UPDATE events SET ${sets.join(', ')}, version = ?, updated_at = ? WHERE id = ? AND organizer_id = ?`).bind(...values, version, new Date().toISOString(), event.id, currentUser(c).clerkId),
-    c.env.DB.prepare(`INSERT INTO outbox (id, type, aggregate_id, payload) VALUES (?, 'EVENT_UPDATE', ?, ?)`).bind(outboxId, event.id, JSON.stringify({ eventId: event.id, version, changedFields: changed.map(([key]) => key) })),
-  ]);
-  c.executionCtx.waitUntil(dispatchPendingOutbox(c.env));
+  const changedFields = changed.map(([key]) => key);
+  const notificationFields = new Set(['title', 'description', 'venue', 'startsAt', 'endsAt', 'status']);
+  const shouldNotify = changedFields.some((field) => notificationFields.has(field));
+  const statements = [c.env.DB.prepare(`UPDATE events SET ${sets.join(', ')}, version = ?, updated_at = ? WHERE id = ? AND organizer_id = ?`).bind(...values, version, new Date().toISOString(), event.id, currentUser(c).clerkId)];
+  if (shouldNotify) statements.push(c.env.DB.prepare(`INSERT INTO outbox (id, type, aggregate_id, payload) VALUES (?, 'EVENT_UPDATE', ?, ?)`).bind(outboxId, event.id, JSON.stringify({ eventId: event.id, version, changes: changed.map(([field, value]) => ({ field, value })) })));
+  await c.env.DB.batch(statements);
+  if (shouldNotify) c.executionCtx.waitUntil(dispatchPendingOutbox(c.env));
   return c.json({ data: publicEvent((await getEvent(c.env, event.id))!) });
 });
 

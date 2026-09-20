@@ -3,7 +3,15 @@ import { listBookedRecipients, loadOutbox, markOutboxFailed, markOutboxProcessed
 import type { Env, JobMessage } from './types';
 
 type BookingPayload = { bookingId: string; eventId: string; customerId: string; benchmark?: boolean };
-type UpdatePayload = { eventId: string; version: number; changedFields: string[] };
+type UpdatePayload = { eventId: string; version: number; changes: Array<{ field: string; value: unknown }> };
+
+const escapeHtml = (value: unknown) => String(value).replace(/[&<>'"]/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[character]!);
+const updateDetail = ({ field, value }: UpdatePayload['changes'][number]) => {
+  if (field === 'startsAt') return `<li><strong>Starts:</strong> ${escapeHtml(new Date(String(value)).toUTCString())}</li>`;
+  if (field === 'endsAt') return `<li><strong>Ends:</strong> ${escapeHtml(new Date(String(value)).toUTCString())}</li>`;
+  const labels: Record<string, string> = { title: 'Event name', description: 'Description', venue: 'Venue', status: 'Status' };
+  return `<li><strong>${labels[field] ?? 'Event detail'}:</strong> ${escapeHtml(value)}</li>`;
+};
 
 async function sendEmail(env: Env, to: string, subject: string, html: string, idempotencyKey: string): Promise<string | null> {
   if (env.APP_ENV === 'baseline' && to.endsWith('.invalid')) return null;
@@ -74,7 +82,7 @@ async function deliverEventUpdate(env: Env, outboxId: string): Promise<void> {
       env,
       recipient,
       `Event update — ${event.title}`,
-      `<h1>${event.title} has been updated</h1><p>${new Date(event.starts_at).toUTCString()} · ${event.venue}</p><p>Status: ${event.status}</p><p>Updated details: ${payload.changedFields.join(', ') || 'event information'}.</p>`,
+      `<h1>${escapeHtml(event.title)} has been updated</h1><p>Here is what changed:</p><ul>${payload.changes.map(updateDetail).join('')}</ul>`,
       key,
     );
     await env.DB.prepare(`UPDATE notification_deliveries SET status = 'SENT', provider_message_id = ?, sent_at = ?, attempts = attempts + 1 WHERE idempotency_key = ?`).bind(providerId, new Date().toISOString(), key).run();
