@@ -1,24 +1,37 @@
-import { importSPKI, jwtVerify } from 'jose';
+import { createRemoteJWKSet, jwtVerify } from 'jose';
 import type { Context, Next } from 'hono';
 import { AppError } from './errors';
 import type { AuthUser, Env, Role } from './types';
 
 type ClerkClaims = { sub: string; email?: string; email_address?: string };
+const jwksByIssuer = new Map<string, ReturnType<typeof createRemoteJWKSet>>();
 
 function organizerIds(env: Env): Set<string> {
   return new Set(env.ORGANIZER_CLERK_IDS.split(',').map((id) => id.trim()).filter(Boolean));
 }
 
+function clerkJwks(issuer: string) {
+  let jwks = jwksByIssuer.get(issuer);
+  if (!jwks) {
+    const url = new URL('/.well-known/jwks.json', issuer);
+    if (url.protocol !== 'https:') throw new AppError(503, 'AUTH_NOT_CONFIGURED', 'Authentication is not configured.');
+    jwks = createRemoteJWKSet(url);
+    jwksByIssuer.set(issuer, jwks);
+  }
+  return jwks;
+}
+
 async function verifyIdentity(header: string | undefined, env: Env): Promise<{ clerkId: string; email: string }> {
   if (!header?.startsWith('Bearer ')) throw new AppError(401, 'UNAUTHENTICATED', 'A valid bearer token is required.');
   const token = header.slice(7);
-  if (!env.CLERK_JWT_PUBLIC_KEY) throw new AppError(503, 'AUTH_NOT_CONFIGURED', 'Authentication is not configured.');
+  if (!env.CLERK_ISSUER || !env.CLERK_AUDIENCE) throw new AppError(503, 'AUTH_NOT_CONFIGURED', 'Authentication is not configured.');
   try {
-    const key = await importSPKI(env.CLERK_JWT_PUBLIC_KEY.replace(/\\n/g, '\n'), 'RS256');
-    const { payload } = await jwtVerify(token, key, {
+    const { payload } = await jwtVerify(token, clerkJwks(env.CLERK_ISSUER), {
       issuer: env.CLERK_ISSUER,
       audience: env.CLERK_AUDIENCE,
       algorithms: ['RS256'],
+      // Preserve expiry checks while allowing bounded local/identity-provider clock drift.
+      clockTolerance: 60,
     });
     const claims = payload as ClerkClaims;
     const email = claims.email ?? claims.email_address;

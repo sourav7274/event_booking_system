@@ -20,10 +20,10 @@
   "vars": {
     "APP_ENV": "production",
     "APP_ORIGIN": "https://REPLACE_WITH_YOUR_DOMAIN",
-    "CLERK_ISSUER": "https://REPLACE_WITH_CLERK_ISSUER",
+    "CLERK_ISSUER": "https://giving-swift-1446.clerk.accounts.dev",
     "CLERK_AUDIENCE": "venueflow",
-    "EMAIL_FROM": "Venueflow <tickets@REPLACE_WITH_YOUR_DOMAIN>",
-    "ORGANIZER_CLERK_IDS": ""
+    "EMAIL_FROM": "Venueflow <tickets@events.accuratetimezone.com>",
+    "ORGANIZER_CLERK_IDS": "user_3Ja8RUdk2N1pOzbM944ME7XQWhm"
   },
   "env": {
     "baseline": {
@@ -37,10 +37,10 @@
       "vars": {
         "APP_ENV": "baseline",
         "APP_ORIGIN": "https://venueflow-baseline.REPLACE_WITH_ACCOUNT.workers.dev",
-        "CLERK_ISSUER": "https://REPLACE_WITH_CLERK_ISSUER",
+        "CLERK_ISSUER": "https://giving-swift-1446.clerk.accounts.dev",
         "CLERK_AUDIENCE": "venueflow",
         "EMAIL_FROM": "Venueflow Benchmark <tickets@REPLACE_WITH_YOUR_DOMAIN>",
-        "ORGANIZER_CLERK_IDS": ""
+        "ORGANIZER_CLERK_IDS": "user_3Ja8RUdk2N1pOzbM944ME7XQWhm"
       }
     }
   }

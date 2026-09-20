@@ -39,6 +39,8 @@ The Worker serves both static React assets and the API. This avoids a second fro
 
 Clerk handles identity, session, password security, and signed tokens. The Worker verifies the JWT locally and D1 remains the authority for application roles. A user cannot submit a role in an API request. Configure bootstrap organizers through `ORGANIZER_CLERK_IDS`.
 
+JWT verification pins the expected issuer, audience, and `RS256` algorithm. It permits a bounded 60-second `nbf` clock tolerance so valid short-lived Clerk tokens are not rejected by local/identity-provider clock drift; expiry is still enforced.
+
 ## Key design decisions
 
 ### Cloudflare-native deployment
@@ -93,6 +95,7 @@ This submission intentionally excludes payments, refunds, customer cancellations
 
    ```powershell
    Copy-Item .dev.vars.example .dev.vars
+   Copy-Item .env.local.example .env.local
    ```
 
    Then run the local production schema and development server:
@@ -103,6 +106,8 @@ This submission intentionally excludes payments, refunds, customer cancellations
    ```
 
    Open the local URL shown by Wrangler (normally `http://localhost:8787`). Public health and dashboard routes work without Clerk configuration; protected API routes require valid Clerk values in `.dev.vars`.
+
+   The browser reads only `VITE_CLERK_PUBLISHABLE_KEY` and `VITE_CLERK_JWT_TEMPLATE` from `.env.local`; these are safe-to-expose values. Restart the dev server after changing them.
 
 3. When ready for remote deployment, create two D1 databases and two Queues:
 
@@ -118,9 +123,16 @@ This submission intentionally excludes payments, refunds, customer cancellations
 5. Configure Clerk:
 
    - Create a Clerk application.
-   - Configure a session-token custom claim containing the verified primary email.
-   - Copy the JWT public key, issuer, and audience into Worker configuration.
+   - Create an API JWT template named `venueflow-api` with audience `venueflow` and a string `email` claim for the primary email address. This is the token requested by the frontend, rather than the browser session token:
+
+     ```json
+     { "aud": "venueflow", "email": "{{user.primary_email_address}}" }
+     ```
+   - Put the Clerk publishable key and `venueflow-api` template name in `.env.local`.
+   - Replace the issuer placeholder in `wrangler.jsonc` with the Clerk Frontend API URL. The Worker resolves Clerk's JWKS endpoint from this HTTPS issuer, so signing-key rotation does not require a redeploy. Keep the audience as `venueflow` to match the template.
    - Add a Clerk user ID to `ORGANIZER_CLERK_IDS` for organizer testing.
+
+   Do not paste Clerk private keys or Resend API keys into source files or chat. The public publishable key is the only Clerk value intentionally sent to the browser.
 
 6. Configure Resend:
 
@@ -151,7 +163,6 @@ npm run deploy:baseline
 Set sensitive values with `wrangler secret put` rather than `vars`:
 
 ```bash
-npx wrangler secret put CLERK_JWT_PUBLIC_KEY
 npx wrangler secret put RESEND_API_KEY
 npx wrangler secret put BENCHMARK_SECRET
 ```

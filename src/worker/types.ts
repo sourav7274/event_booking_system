@@ -9,7 +9,7 @@ export interface Env {
   APP_ORIGIN: string;
   CLERK_ISSUER: string;
   CLERK_AUDIENCE: string;
-  CLERK_JWT_PUBLIC_KEY: string;
+  CLERK_JWT_PUBLIC_KEY?: string;
   ORGANIZER_CLERK_IDS: string;
   RESEND_API_KEY?: string;
   EMAIL_FROM: string;

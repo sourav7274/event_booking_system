@@ -1,3 +1,5 @@
-CLERK_JWT_PUBLIC_KEY="-----BEGIN PUBLIC KEY-----\n...\n-----END PUBLIC KEY-----"
+# Clerk JWT signing keys are resolved through the configured issuer's JWKS endpoint.
+# Keep the actual issuer/audience in wrangler.jsonc (or an environment-specific config).
+# The Clerk API token template must include a string `email` claim.
 RESEND_API_KEY="re_..."
 BENCHMARK_SECRET="replace-with-a-long-random-value"
