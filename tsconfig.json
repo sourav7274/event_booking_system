@@ -1,0 +1,15 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "WebWorker", "DOM"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "skipLibCheck": true,
+    "jsx": "react-jsx",
+    "types": ["@cloudflare/workers-types"]
+  },
+  "include": ["src", "vite.config.ts", "vitest.config.ts"]
+}

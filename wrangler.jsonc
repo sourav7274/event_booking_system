@@ -1,0 +1,47 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "venueflow-production",
+  "main": "src/worker/index.ts",
+  "compatibility_date": "2026-09-20",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS",
+    "run_worker_first": ["/api/*", "/health", "/docs", "/openapi.json", "/internal/*"]
+  },
+  "d1_databases": [
+    { "binding": "DB", "database_name": "venueflow-production", "database_id": "00000000-0000-0000-0000-000000000000", "migrations_dir": "migrations-production" }
+  ],
+  "queues": {
+    "producers": [{ "binding": "JOBS", "queue": "venueflow-production-jobs" }],
+    "consumers": [{ "queue": "venueflow-production-jobs", "max_batch_size": 10, "max_batch_timeout": 5, "max_retries": 5 }]
+  },
+  "triggers": { "crons": ["*/10 * * * *"] },
+  "vars": {
+    "APP_ENV": "production",
+    "APP_ORIGIN": "https://REPLACE_WITH_YOUR_DOMAIN",
+    "CLERK_ISSUER": "https://REPLACE_WITH_CLERK_ISSUER",
+    "CLERK_AUDIENCE": "venueflow",
+    "EMAIL_FROM": "Venueflow <tickets@REPLACE_WITH_YOUR_DOMAIN>",
+    "ORGANIZER_CLERK_IDS": ""
+  },
+  "env": {
+    "baseline": {
+      "name": "venueflow-baseline",
+      "d1_databases": [{ "binding": "DB", "database_name": "venueflow-baseline", "database_id": "00000000-0000-0000-0000-000000000001", "migrations_dir": "migrations" }],
+      "queues": {
+        "producers": [{ "binding": "JOBS", "queue": "venueflow-baseline-jobs" }],
+        "consumers": [{ "queue": "venueflow-baseline-jobs", "max_batch_size": 10, "max_batch_timeout": 5, "max_retries": 5 }]
+      },
+      "triggers": { "crons": ["*/10 * * * *"] },
+      "vars": {
+        "APP_ENV": "baseline",
+        "APP_ORIGIN": "https://venueflow-baseline.REPLACE_WITH_ACCOUNT.workers.dev",
+        "CLERK_ISSUER": "https://REPLACE_WITH_CLERK_ISSUER",
+        "CLERK_AUDIENCE": "venueflow",
+        "EMAIL_FROM": "Venueflow Benchmark <tickets@REPLACE_WITH_YOUR_DOMAIN>",
+        "ORGANIZER_CLERK_IDS": ""
+      }
+    }
+  }
+}
