@@ -88,30 +88,36 @@ export async function createOptimizedBooking(
   quantity: number,
   idempotencyKey: string,
 ): Promise<BookingRecord> {
-  const event = await getEvent(env, eventId);
-  if (!event) throw new AppError(404, 'EVENT_NOT_FOUND', 'Event not found.');
   const bookingId = crypto.randomUUID();
   const outboxId = crypto.randomUUID();
   try {
-    await env.DB.batch([
+    const result = await env.DB.batch([
+      env.DB.prepare(
+        `UPDATE events SET tickets_sold = tickets_sold + ?, updated_at = ?
+         WHERE id = ? AND status = 'PUBLISHED' AND starts_at > ? AND tickets_sold + ? <= capacity`,
+      ).bind(quantity, now(), eventId, now(), quantity),
       env.DB.prepare(
         `INSERT INTO bookings (id, event_id, customer_id, quantity, unit_price_minor, total_price_minor, idempotency_key)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      ).bind(bookingId, eventId, customer.clerkId, quantity, event.price_minor, event.price_minor * quantity, idempotencyKey),
-      env.DB.prepare(`INSERT INTO outbox (id, type, aggregate_id, payload) VALUES (?, 'BOOKING_CONFIRMATION', ?, ?)`).bind(
+         SELECT ?, e.id, ?, ?, e.price_minor, e.price_minor * ?, ? FROM events e WHERE e.id = ? AND changes() = 1`,
+      ).bind(bookingId, customer.clerkId, quantity, quantity, idempotencyKey, eventId),
+      env.DB.prepare(`INSERT INTO outbox (id, type, aggregate_id, payload) SELECT ?, 'BOOKING_CONFIRMATION', ?, ? WHERE changes() = 1`).bind(
         outboxId, bookingId, bookingPayload(bookingId, eventId, customer.clerkId),
       ),
+      env.DB.prepare(`SELECT id, event_id, customer_id, quantity, unit_price_minor, total_price_minor, created_at FROM bookings WHERE id = ?`).bind(bookingId),
     ]);
+    if ((result[0]?.meta.changes ?? 0) !== 1) throw new AppError(409, 'SOLD_OUT', 'This event is unavailable or sold out.');
+    const booking = result[3]?.results[0] as BookingRecord | undefined;
+    if (!booking) throw new AppError(409, 'SOLD_OUT', 'This event is unavailable or sold out.');
+    return booking;
   } catch (error) {
+    if (error instanceof AppError) throw error;
     const message = error instanceof Error ? error.message : '';
-    if (message.includes('EVENT_NOT_BOOKABLE_OR_SOLD_OUT')) throw new AppError(409, 'SOLD_OUT', 'This event is unavailable or sold out.');
     if (message.includes('UNIQUE constraint failed: bookings.customer_id, bookings.idempotency_key')) {
       const existing = await findExistingBooking(env, customer.clerkId, idempotencyKey);
       if (existing) return existing;
     }
     throw error;
   }
-  return { id: bookingId, event_id: eventId, customer_id: customer.clerkId, quantity, unit_price_minor: event.price_minor, total_price_minor: event.price_minor * quantity, created_at: now() };
 }
 
 export async function loadOutbox(env: Env, id: string): Promise<OutboxRow> {

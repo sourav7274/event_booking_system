@@ -60,7 +60,7 @@ Money is stored as integer minor units. Event times are ISO-8601 UTC strings. Ev
 
 Venueflow stores event timestamps in UTC, while its current organizer/customer UI intentionally displays and edits them in Indian Standard Time (`Asia/Kolkata`). This keeps API persistence unambiguous while matching the product's single-timezone operating context.
 
-The final production migration adds a database trigger that atomically validates event availability and increments `tickets_sold` during booking insertion. The invariant is:
+The final production path eliminates the baseline preflight read. It uses one D1 batch: conditional inventory increment, booking insert gated by the update result, durable outbox insert, and booking readback. The invariant is:
 
 ```text
 tickets_sold = sum(confirmed booking quantities) <= capacity
@@ -148,7 +148,7 @@ The small frontend is a convenience layer over the same protected APIs used in t
    - Add the shown SPF/DKIM DNS records.
    - Verify the domain and store `RESEND_API_KEY` as a Worker secret.
 
-7. Apply migrations. Baseline uses the `migrations/` directory; production uses the separate `migrations-production/` directory, which adds the optimized trigger:
+7. Apply migrations. Baseline uses the `migrations/` directory; production uses the separate `migrations-production/` directory, which adds the production booking index and keeps the atomic reservation batch portable across local and remote D1:
 
    ```bash
    npx wrangler d1 migrations apply venueflow-baseline --remote --env baseline
@@ -203,10 +203,10 @@ The assessment requires an honest before/after result. Do not create artificial 
 2. Tag it `baseline-v1`, deploy the baseline environment, and run the same k6 scenario described below.
 3. Capture p50/p95/p99, successful bookings, unexpected failures, database errors, and inventory reconciliation.
 4. Identify the measured bottleneck.
-5. Apply only justified improvements, such as fewer D1 round trips, atomic trigger-based reservation, narrower queries, indexes, and asynchronous queue publication.
+5. Apply only justified improvements, such as fewer D1 round trips, atomic reservation batches, narrower queries, indexes, and asynchronous queue publication.
 6. Deploy production and repeat exactly the same scenario.
 
-The current baseline performs an availability read followed by a conditional transactional batch. Production is prepared for the trigger-based reservation migration. Do not claim a concurrency limit until k6 produces it.
+The current baseline performs an availability read followed by a conditional transactional batch. Production performs the same correctness-preserving reservation in one atomic batch without the preflight read. Do not claim a concurrency limit until k6 produces it.
 
 Use a high-capacity synthetic event so `409 SOLD_OUT` is not mistaken for a dropped request. A stage fails when unexpected timeout/5xx failures exceed 1%, p95 exceeds 750 ms, throughput plateaus, or inventory is inconsistent.
 

@@ -10,7 +10,7 @@
     "run_worker_first": ["/api/*", "/health", "/docs", "/openapi.json", "/internal/*"]
   },
   "d1_databases": [
-    { "binding": "DB", "database_name": "venueflow-production", "database_id": "00000000-0000-0000-0000-000000000000", "migrations_dir": "migrations-production" }
+    { "binding": "DB", "database_name": "venueflow-production", "database_id": "31f66eae-784e-4de9-8143-48daff26a746", "migrations_dir": "migrations-production" }
   ],
   "queues": {
     "producers": [{ "binding": "JOBS", "queue": "venueflow-production-jobs" }],
@@ -19,7 +19,7 @@
   "triggers": { "crons": ["*/10 * * * *"] },
   "vars": {
     "APP_ENV": "production",
-    "APP_ORIGIN": "https://REPLACE_WITH_YOUR_DOMAIN",
+    "APP_ORIGIN": "https://events.accuratetimezone.com",
     "CLERK_ISSUER": "https://giving-swift-1446.clerk.accounts.dev",
     "CLERK_AUDIENCE": "venueflow",
     "EMAIL_FROM": "Venueflow <tickets@events.accuratetimezone.com>",
@@ -28,7 +28,7 @@
   "env": {
     "baseline": {
       "name": "venueflow-baseline",
-      "d1_databases": [{ "binding": "DB", "database_name": "venueflow-baseline", "database_id": "00000000-0000-0000-0000-000000000001", "migrations_dir": "migrations" }],
+      "d1_databases": [{ "binding": "DB", "database_name": "venueflow-baseline", "database_id": "0fe8e0e1-0a98-4a1b-be32-92a76d020b2d", "migrations_dir": "migrations" }],
       "queues": {
         "producers": [{ "binding": "JOBS", "queue": "venueflow-baseline-jobs" }],
         "consumers": [{ "queue": "venueflow-baseline-jobs", "max_batch_size": 10, "max_batch_timeout": 5, "max_retries": 5 }]
@@ -36,7 +36,7 @@
       "triggers": { "crons": ["*/10 * * * *"] },
       "vars": {
         "APP_ENV": "baseline",
-        "APP_ORIGIN": "https://venueflow-baseline.REPLACE_WITH_ACCOUNT.workers.dev",
+        "APP_ORIGIN": "https://venueflow-baseline.samjhonson932.workers.dev",
         "CLERK_ISSUER": "https://giving-swift-1446.clerk.accounts.dev",
         "CLERK_AUDIENCE": "venueflow",
         "EMAIL_FROM": "Venueflow Benchmark <tickets@REPLACE_WITH_YOUR_DOMAIN>",
