@@ -2,6 +2,7 @@ import { Show, SignInButton, SignUpButton, UserButton, useAuth } from '@clerk/re
 import { useEffect, useMemo, useState } from 'react';
 
 type EventItem = { id: string; title: string; description: string; venue: string; startsAt: string; capacity: number; ticketsRemaining: number; priceMinor: number; currency: string; status: string };
+type UserProfile = { role: 'CUSTOMER' | 'ORGANIZER' };
 const money = (value: number, currency: string) => new Intl.NumberFormat('en-US', { style: 'currency', currency }).format(value / 100);
 const time = (value: string) => new Intl.DateTimeFormat('en', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(new Date(value));
 
@@ -37,7 +38,35 @@ function BookingButton({ event, quantity }: { event: EventItem; quantity: number
 }
 
 function BookingAction({ event, quantity }: { event: EventItem; quantity: number }) {
-  return <><Show when="signed-in"><BookingButton event={event} quantity={quantity} /></Show><Show when="signed-out"><SignInButton mode="modal"><button className="book" disabled={event.ticketsRemaining === 0}>Sign in to book <span aria-hidden="true">→</span></button></SignInButton></Show></>;
+  const [role, setRole] = useState<UserProfile['role'] | null>(null);
+  const [roleStatus, setRoleStatus] = useState<'loading' | 'ready' | 'error'>('loading');
+  const { getToken, isSignedIn, userId } = useAuth();
+  const template = import.meta.env.VITE_CLERK_JWT_TEMPLATE;
+  useEffect(() => {
+    if (!isSignedIn) { setRole(null); setRoleStatus('loading'); return; }
+    let cancelled = false;
+    setRole(null);
+    setRoleStatus('loading');
+    void (async () => {
+      try {
+        const token = await getToken(template ? { template, skipCache: true } : { skipCache: true });
+        if (!token) throw new Error('Missing authentication token.');
+        const response = await fetch('/api/v1/me', { headers: { Authorization: `Bearer ${token}` } });
+        if (!response.ok) throw new Error('Profile request failed.');
+        const body = await response.json() as { data: UserProfile };
+        if (!cancelled) { setRole(body.data.role); setRoleStatus('ready'); }
+      } catch { if (!cancelled) setRoleStatus('error'); }
+    })();
+    return () => { cancelled = true; };
+  }, [getToken, isSignedIn, template, userId]);
+  const bookingControl = roleStatus === 'loading'
+    ? <p className="auth-note">Checking account access…</p>
+    : roleStatus === 'error'
+      ? <p className="booking-message">We could not determine your account type. Refresh and try again.</p>
+      : role === 'ORGANIZER'
+        ? <p className="auth-note">Organizer account — ticket booking is unavailable.</p>
+        : <BookingButton event={event} quantity={quantity} />;
+  return <><Show when="signed-in">{bookingControl}</Show><Show when="signed-out"><SignInButton mode="modal"><button className="book" disabled={event.ticketsRemaining === 0}>Sign in to book <span aria-hidden="true">→</span></button></SignInButton></Show></>;
 }
 
 export function App({ authEnabled }: { authEnabled: boolean }) {
