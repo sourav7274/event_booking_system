@@ -74,7 +74,7 @@ function BookingAction({ event, quantity }: { event: EventItem; quantity: number
   return <><Show when="signed-in">{bookingControl}</Show><Show when="signed-out"><SignInButton mode="modal"><button className="book" disabled={event.ticketsRemaining === 0}>Sign in to book <span aria-hidden="true">→</span></button></SignInButton></Show></>;
 }
 
-const blankEvent = () => ({ title: '', description: '', venue: '', startsAt: '', endsAt: '', capacity: '100', priceMinor: '49900', currency: 'INR', status: 'DRAFT' });
+const blankEvent = () => ({ title: '', description: '', venue: '', startsAt: '', endsAt: '', capacity: '100', priceMinor: '499', currency: 'INR', status: 'DRAFT' });
 
 function OrganizerConsole() {
   const { getToken, isSignedIn, userId } = useAuth();
@@ -96,12 +96,12 @@ function OrganizerConsole() {
     if (response.ok) { setAllowed(true); setEvents((await response.json() as { data: EventItem[] }).data); }
   };
   useEffect(() => { if (isSignedIn) void load(); else setAllowed(false); }, [isSignedIn, userId]);
-  const edit = (event: EventItem) => { setEditingId(event.id); setDraft({ title: event.title, description: event.description, venue: event.venue, startsAt: dateTimeInput(event.startsAt), endsAt: dateTimeInput(event.endsAt), capacity: String(event.capacity), priceMinor: String(event.priceMinor), currency: event.currency, status: event.status }); setMessage(null); };
+  const edit = (event: EventItem) => { setEditingId(event.id); setDraft({ title: event.title, description: event.description, venue: event.venue, startsAt: dateTimeInput(event.startsAt), endsAt: dateTimeInput(event.endsAt), capacity: String(event.capacity), priceMinor: String(Math.round(event.priceMinor / 100)), currency: event.currency, status: event.status }); setMessage(null); };
   async function save(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault(); setBusy(true); setMessage(null);
     try {
       const jwt = await token(); if (!jwt) throw new Error('Please sign in again.');
-      const body = { ...draft, startsAt: istToIso(draft.startsAt), endsAt: istToIso(draft.endsAt), capacity: Number(draft.capacity), priceMinor: Number(draft.priceMinor) };
+      const body = { ...draft, startsAt: istToIso(draft.startsAt), endsAt: istToIso(draft.endsAt), capacity: Number(draft.capacity), priceMinor: Number(draft.priceMinor) * 100 };
       const response = await fetch(editingId ? `/api/v1/organizer/events/${editingId}` : '/api/v1/organizer/events', { method: editingId ? 'PATCH' : 'POST', headers: { Authorization: `Bearer ${jwt}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       const result = await response.json() as { error?: { message?: string } }; if (!response.ok) throw new Error(result.error?.message ?? 'Event could not be saved.');
       setMessage(editingId ? 'Event updated. Attendee notifications are queued.' : 'Event created.'); setEditingId(null); setDraft(blankEvent()); await load();
