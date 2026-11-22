@@ -111,7 +111,10 @@ export async function createOptimizedBooking(
   quantity: number,
   idempotencyKey: string,
   suppressEmail = false,
-): Promise<BookingRecord> {
+): Promise<{ booking: BookingRecord; replayed: boolean }> {
+  // One D1 round trip: conditional inventory update, booking insert, optional outbox insert,
+  // and read-back run as a single transactional batch. Replays surface as a UNIQUE violation,
+  // which rolls the whole batch back (including the inventory increment).
   const bookingId = crypto.randomUUID();
   const outboxId = crypto.randomUUID();
   try {
@@ -135,13 +138,13 @@ export async function createOptimizedBooking(
     if ((result[0]?.meta.changes ?? 0) !== 1) throw new AppError(409, 'SOLD_OUT', 'This event is unavailable or sold out.');
     const booking = result[result.length - 1]?.results[0] as BookingRecord | undefined;
     if (!booking) throw new AppError(409, 'SOLD_OUT', 'This event is unavailable or sold out.');
-    return booking;
+    return { booking, replayed: false };
   } catch (error) {
     if (error instanceof AppError) throw error;
     const message = error instanceof Error ? error.message : '';
     if (message.includes('UNIQUE constraint failed: bookings.customer_id, bookings.idempotency_key')) {
       const existing = await findExistingBooking(env, customer.clerkId, idempotencyKey);
-      if (existing) return existing;
+      if (existing) return { booking: existing, replayed: true };
     }
     throw error;
   }

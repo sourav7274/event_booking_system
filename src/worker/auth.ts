@@ -43,7 +43,32 @@ async function verifyIdentity(header: string | undefined, env: Env): Promise<{ c
   }
 }
 
+// Optimized path: per-isolate cache of synced profiles. Roles come from server config, so a short
+// TTL only delays email changes; it removes user-sync DB round trips from repeat requests.
+const USER_CACHE_TTL_MS = 60_000;
+const USER_CACHE_MAX = 10_000;
+const userCache = new Map<string, { user: AuthUser; expiresAt: number }>();
+
+async function syncUserOptimized(identity: { clerkId: string; email: string }, env: Env): Promise<AuthUser> {
+  const cacheKey = `${identity.clerkId}\n${identity.email}`;
+  const cached = userCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) return cached.user;
+  const bootstrapRole: Role = organizerIds(env).has(identity.clerkId) ? 'ORGANIZER' : 'CUSTOMER';
+  // One round trip instead of upsert + select.
+  const row = await env.DB.prepare(
+    `INSERT INTO users (clerk_id, email, role) VALUES (?, ?, ?)
+     ON CONFLICT(clerk_id) DO UPDATE SET email = excluded.email
+     RETURNING clerk_id, email, role`,
+  ).bind(identity.clerkId, identity.email, bootstrapRole).first<{ clerk_id: string; email: string; role: Role }>();
+  if (!row) throw new AppError(500, 'USER_SYNC_FAILED', 'Unable to prepare the user profile.');
+  const user: AuthUser = { clerkId: row.clerk_id, email: row.email, role: row.role };
+  if (userCache.size >= USER_CACHE_MAX) userCache.clear();
+  userCache.set(cacheKey, { user, expiresAt: Date.now() + USER_CACHE_TTL_MS });
+  return user;
+}
+
 async function syncUser(identity: { clerkId: string; email: string }, env: Env): Promise<AuthUser> {
+  if (env.APP_ENV !== 'baseline') return syncUserOptimized(identity, env);
   const bootstrapRole: Role = organizerIds(env).has(identity.clerkId) ? 'ORGANIZER' : 'CUSTOMER';
   await env.DB.prepare(
     `INSERT INTO users (clerk_id, email, role) VALUES (?, ?, ?)

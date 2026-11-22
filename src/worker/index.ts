@@ -55,11 +55,18 @@ app.post('/api/v1/events/:eventId/bookings', requireAuth, requireRole('CUSTOMER'
   // Only the server-held benchmark secret can suppress delivery; normal app/API requests always send email.
   const benchmarkSecret = c.env.BENCHMARK_SECRET;
   const suppressEmail = Boolean(benchmarkSecret) && c.req.header('X-Benchmark-Secret') === benchmarkSecret;
-  const existing = await findExistingBooking(c.env, user.clerkId, idempotencyKey);
-  if (existing) return c.json({ data: existing, meta: { replayed: true } }, 200);
-  const booking = c.env.APP_ENV === 'baseline'
-    ? await createBaselineBooking(c.env, user, c.req.param('eventId'), c.req.valid('json').quantity, idempotencyKey, suppressEmail)
-    : await createOptimizedBooking(c.env, user, c.req.param('eventId'), c.req.valid('json').quantity, idempotencyKey, suppressEmail);
+  let booking;
+  if (c.env.APP_ENV === 'baseline') {
+    const existing = await findExistingBooking(c.env, user.clerkId, idempotencyKey);
+    if (existing) return c.json({ data: existing, meta: { replayed: true } }, 200);
+    booking = await createBaselineBooking(c.env, user, c.req.param('eventId'), c.req.valid('json').quantity, idempotencyKey, suppressEmail);
+  } else {
+    // Optimized: no idempotency pre-read. The UNIQUE(customer_id, idempotency_key) constraint
+    // detects replays inside the single booking batch.
+    const result = await createOptimizedBooking(c.env, user, c.req.param('eventId'), c.req.valid('json').quantity, idempotencyKey, suppressEmail);
+    if (result.replayed) return c.json({ data: result.booking, meta: { replayed: true } }, 200);
+    booking = result.booking;
+  }
   // Synthetic benchmark requests exercise the booking API only. They do not
   // create an outbox row or consume Queue operations; normal traffic does.
   if (!suppressEmail) c.executionCtx.waitUntil(dispatchPendingOutbox(c.env));
