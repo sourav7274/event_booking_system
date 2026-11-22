@@ -182,6 +182,12 @@ npx wrangler secret put BENCHMARK_SECRET
 
 Attach the production Worker to a dedicated subdomain such as `events.example.com`. Keep the baseline only on its generated `workers.dev` URL.
 
+### Vercel frontend
+
+Vercel builds the Vite client and forwards `/api/v1/*` to the production Cloudflare Worker at `https://events.accuratetimezone.com`. Keeping these requests on the frontend's origin lets the same client code work on both hosts. Cloudflare still owns the API, database, and background jobs.
+
+Set `VITE_CLERK_PUBLISHABLE_KEY` and `VITE_CLERK_JWT_TEMPLATE` on the Vercel project before deploying. These values are included in the browser bundle. Keep backend secrets in Cloudflare, and never upload local environment files.
+
 ## API overview
 
 | Method | Path | Purpose |
