@@ -34,9 +34,9 @@ async function deliverBookingConfirmation(env: Env, outboxId: string): Promise<v
   const outbox = await loadOutbox(env, outboxId);
   const payload = JSON.parse(outbox.payload) as BookingPayload;
   const booking = await env.DB.prepare(
-    `SELECT b.id, b.quantity, b.total_price_minor, b.created_at, e.title, e.venue, e.starts_at, e.currency, u.email
+    `SELECT b.id, b.quantity, b.total_price_minor, b.created_at, e.title, e.venue, e.starts_at, e.ends_at, e.currency, u.email
      FROM bookings b JOIN events e ON e.id = b.event_id JOIN users u ON u.clerk_id = b.customer_id WHERE b.id = ?`,
-  ).bind(payload.bookingId).first<{ id: string; quantity: number; total_price_minor: number; created_at: string; title: string; venue: string; starts_at: string; currency: string; email: string }>();
+  ).bind(payload.bookingId).first<{ id: string; quantity: number; total_price_minor: number; created_at: string; title: string; venue: string; starts_at: string; ends_at: string; currency: string; email: string }>();
   if (!booking) throw new AppError(404, 'BOOKING_NOT_FOUND', 'Booking not found.');
   const deliveryId = crypto.randomUUID();
   const key = `booking-confirmed/${booking.id}`;
@@ -54,7 +54,13 @@ async function deliverBookingConfirmation(env: Env, outboxId: string): Promise<v
     env,
     booking.email,
     `Booking confirmed — ${booking.title}`,
-    `<h1>Your booking is confirmed</h1><p><strong>${booking.title}</strong></p><p>${new Date(booking.starts_at).toUTCString()} · ${booking.venue}</p><p>${booking.quantity} ticket(s) · ${price}</p><p>Booking reference: ${booking.id}</p>`,
+    `<h1>Your booking is confirmed</h1>
+     <p><strong>${escapeHtml(booking.title)}</strong></p>
+     <p><strong>Starts:</strong> ${new Date(booking.starts_at).toUTCString()}<br>
+        <strong>Ends:</strong> ${new Date(booking.ends_at).toUTCString()}<br>
+        <strong>Location:</strong> ${escapeHtml(booking.venue)}</p>
+     <p>${booking.quantity} ticket(s) · ${price}</p>
+     <p>Booking reference: ${escapeHtml(booking.id)}</p>`,
     key,
   );
   await env.DB.prepare(
