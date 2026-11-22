@@ -19,18 +19,39 @@ export async function requireOwnedEvent(env: Env, eventId: string, organizerId: 
 export async function dispatchPendingOutbox(env: Env, limit = 25): Promise<number> {
   const rows = await env.DB.prepare(
     `SELECT id, type, aggregate_id, payload, status, attempts FROM outbox
-     WHERE status = 'PENDING' ORDER BY created_at ASC LIMIT ?`,
-  ).bind(limit).all<OutboxRow>();
+     WHERE status = 'PENDING'
+       AND (dispatch_token IS NULL OR dispatch_started_at < ?)
+     ORDER BY created_at ASC LIMIT ?`,
+  ).bind(new Date(Date.now() - 300_000).toISOString(), limit).all<OutboxRow>();
   let dispatched = 0;
   for (const row of rows.results) {
+    const dispatchToken = crypto.randomUUID();
+    const claimed = await env.DB.prepare(
+      `UPDATE outbox
+       SET dispatch_token = ?, dispatch_started_at = ?
+       WHERE id = ? AND status = 'PENDING'
+         AND (dispatch_token IS NULL OR dispatch_started_at < ?)`,
+    ).bind(dispatchToken, now(), row.id, new Date(Date.now() - 300_000).toISOString()).run();
+    if ((claimed.meta.changes ?? 0) !== 1) continue;
+
     const message: JobMessage = row.type === 'BOOKING_CONFIRMATION'
       ? { type: 'BOOKING_CONFIRMATION', outboxId: row.id }
       : { type: 'EVENT_UPDATE', outboxId: row.id };
-    await env.JOBS.send(message);
-    await env.DB.prepare(
-      `UPDATE outbox SET status = 'DISPATCHED', dispatched_at = ?, attempts = attempts + 1 WHERE id = ? AND status = 'PENDING'`,
-    ).bind(now(), row.id).run();
-    dispatched += 1;
+    try {
+      await env.JOBS.send(message);
+      await env.DB.prepare(
+        `UPDATE outbox
+         SET status = 'DISPATCHED', dispatched_at = ?, attempts = attempts + 1
+         WHERE id = ? AND status = 'PENDING' AND dispatch_token = ?`,
+      ).bind(now(), row.id, dispatchToken).run();
+      dispatched += 1;
+    } catch (error) {
+      await env.DB.prepare(
+        `UPDATE outbox SET dispatch_token = NULL, dispatch_started_at = NULL
+         WHERE id = ? AND status = 'PENDING' AND dispatch_token = ?`,
+      ).bind(row.id, dispatchToken).run();
+      throw error;
+    }
   }
   return dispatched;
 }
@@ -42,8 +63,8 @@ export async function findExistingBooking(env: Env, customerId: string, idempote
   ).bind(customerId, idempotencyKey).first<BookingRecord>();
 }
 
-function bookingPayload(bookingId: string, eventId: string, customerId: string): string {
-  return JSON.stringify({ bookingId, eventId, customerId });
+function bookingPayload(bookingId: string, eventId: string, customerId: string, suppressEmail = false): string {
+  return JSON.stringify({ bookingId, eventId, customerId, suppressEmail });
 }
 
 export async function createBaselineBooking(
@@ -52,6 +73,7 @@ export async function createBaselineBooking(
   eventId: string,
   quantity: number,
   idempotencyKey: string,
+  suppressEmail = false,
 ): Promise<BookingRecord> {
   // Baseline-v1 intentionally uses a clear read followed by a transactional write batch.
   // The conditional update remains authoritative, so normal load cannot oversell inventory.
@@ -74,9 +96,10 @@ export async function createBaselineBooking(
   const insertOutbox = env.DB.prepare(
     `INSERT INTO outbox (id, type, aggregate_id, payload)
      SELECT ?, 'BOOKING_CONFIRMATION', ?, ? WHERE changes() = 1`,
-  ).bind(outboxId, bookingId, bookingPayload(bookingId, eventId, customer.clerkId));
+  ).bind(outboxId, bookingId, bookingPayload(bookingId, eventId, customer.clerkId, suppressEmail));
 
-  const result = await env.DB.batch([update, insertBooking, insertOutbox]);
+  const statements = suppressEmail ? [update, insertBooking] : [update, insertBooking, insertOutbox];
+  const result = await env.DB.batch(statements);
   if ((result[0]?.meta.changes ?? 0) !== 1) throw new AppError(409, 'SOLD_OUT', 'Not enough tickets remain.');
   return { id: bookingId, event_id: eventId, customer_id: customer.clerkId, quantity, unit_price_minor: event.price_minor, total_price_minor: event.price_minor * quantity, created_at: now() };
 }
@@ -87,11 +110,12 @@ export async function createOptimizedBooking(
   eventId: string,
   quantity: number,
   idempotencyKey: string,
+  suppressEmail = false,
 ): Promise<BookingRecord> {
   const bookingId = crypto.randomUUID();
   const outboxId = crypto.randomUUID();
   try {
-    const result = await env.DB.batch([
+    const statements = [
       env.DB.prepare(
         `UPDATE events SET tickets_sold = tickets_sold + ?, updated_at = ?
          WHERE id = ? AND status = 'PUBLISHED' AND starts_at > ? AND tickets_sold + ? <= capacity`,
@@ -100,13 +124,16 @@ export async function createOptimizedBooking(
         `INSERT INTO bookings (id, event_id, customer_id, quantity, unit_price_minor, total_price_minor, idempotency_key)
          SELECT ?, e.id, ?, ?, e.price_minor, e.price_minor * ?, ? FROM events e WHERE e.id = ? AND changes() = 1`,
       ).bind(bookingId, customer.clerkId, quantity, quantity, idempotencyKey, eventId),
-      env.DB.prepare(`INSERT INTO outbox (id, type, aggregate_id, payload) SELECT ?, 'BOOKING_CONFIRMATION', ?, ? WHERE changes() = 1`).bind(
+    ];
+    if (!suppressEmail) {
+      statements.push(env.DB.prepare(`INSERT INTO outbox (id, type, aggregate_id, payload) SELECT ?, 'BOOKING_CONFIRMATION', ?, ? WHERE changes() = 1`).bind(
         outboxId, bookingId, bookingPayload(bookingId, eventId, customer.clerkId),
-      ),
-      env.DB.prepare(`SELECT id, event_id, customer_id, quantity, unit_price_minor, total_price_minor, created_at FROM bookings WHERE id = ?`).bind(bookingId),
-    ]);
+      ));
+    }
+    statements.push(env.DB.prepare(`SELECT id, event_id, customer_id, quantity, unit_price_minor, total_price_minor, created_at FROM bookings WHERE id = ?`).bind(bookingId));
+    const result = await env.DB.batch(statements);
     if ((result[0]?.meta.changes ?? 0) !== 1) throw new AppError(409, 'SOLD_OUT', 'This event is unavailable or sold out.');
-    const booking = result[3]?.results[0] as BookingRecord | undefined;
+    const booking = result[result.length - 1]?.results[0] as BookingRecord | undefined;
     if (!booking) throw new AppError(409, 'SOLD_OUT', 'This event is unavailable or sold out.');
     return booking;
   } catch (error) {

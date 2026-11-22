@@ -2,7 +2,7 @@ import { AppError } from './errors';
 import { listBookedRecipients, loadOutbox, markOutboxFailed, markOutboxProcessed } from './db';
 import type { Env, JobMessage } from './types';
 
-type BookingPayload = { bookingId: string; eventId: string; customerId: string; benchmark?: boolean };
+type BookingPayload = { bookingId: string; eventId: string; customerId: string; suppressEmail?: boolean; benchmark?: boolean };
 type UpdatePayload = { eventId: string; version: number; changes: Array<{ field: string; value: unknown }> };
 
 const escapeHtml = (value: unknown) => String(value).replace(/[&<>'"]/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[character]!);
@@ -45,7 +45,7 @@ async function deliverBookingConfirmation(env: Env, outboxId: string): Promise<v
   ).bind(deliveryId, outboxId, booking.email, key).run();
   const existing = await env.DB.prepare('SELECT status FROM notification_deliveries WHERE idempotency_key = ?').bind(key).first<{ status: string }>();
   if (existing?.status === 'SENT' || existing?.status === 'SUPPRESSED_TEST') return;
-  if (payload.benchmark || booking.email.endsWith('.invalid')) {
+  if (payload.suppressEmail || payload.benchmark || booking.email.endsWith('.invalid')) {
     await env.DB.prepare(`UPDATE notification_deliveries SET status = 'SUPPRESSED_TEST', sent_at = ? WHERE idempotency_key = ?`).bind(new Date().toISOString(), key).run();
     return;
   }

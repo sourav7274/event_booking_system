@@ -70,6 +70,11 @@ All SQL values are parameterized. Dynamic update field names are selected only f
 
 ### Reliable background work
 
+Benchmark scripts use a protected, server-held `BENCHMARK_SECRET` as their delivery toggle. A matching
+synthetic booking does not create an outbox row, so it cannot call Resend or consume Cloudflare Queue
+operations. Normal organizer/customer traffic cannot set this server-derived flag and always creates a
+durable outbox record and sends real email.
+
 D1 and Cloudflare Queues cannot share one distributed transaction. The solution is a transactional outbox:
 
 1. The booking/update and its outbox row commit together in D1.
@@ -78,7 +83,7 @@ D1 and Cloudflare Queues cannot share one distributed transaction. The solution 
 4. Queue consumers call Resend and persist delivery state.
 5. Deterministic Resend idempotency keys prevent duplicate email side effects during retries.
 
-Booking confirmations use `booking-confirmed/{bookingId}`. Event updates use `event-updated/{eventId}/{version}/{recipient}`. Benchmark addresses ending in `.invalid` are marked `SUPPRESSED_TEST`; normal recipients use the real Resend API.
+Booking confirmations use `booking-confirmed/{bookingId}`. Event updates use `event-updated/{eventId}/{version}/{recipient}`. Benchmark requests are marked `SUPPRESSED_TEST`; normal recipients use the real Resend API.
 
 Customer-facing event updates are title, description, venue, start/end time, and status changes. Only these create an event-update outbox row and email existing ticket holders. Capacity, price, and currency changes remain auditable but do not trigger a notification because they do not alter a customer's confirmed booking.
 
@@ -221,11 +226,28 @@ k6 run -e BASE_URL=https://your-worker.example \
   -e VUS=100 load/k6-booking.js
 ```
 
-Run it against baseline first, save the console output, then repeat against production with the same `VUS` stages. The benchmark secret suppresses Resend delivery only for these synthetic jobs; it does not affect ordinary bookings.
+Run it against baseline first, save the console output, then repeat against production with the same `VUS` stages. The benchmark secret prevents synthetic jobs from being created, so the load test does not use Resend or Cloudflare Queue operations; ordinary bookings are unaffected.
 
 Separately test event-update fan-out at 10, 25, 50, and 100 recipients. Measure update response latency, pending jobs, queue drain time, retries, and duplicate logical deliveries. Demonstrate real emails only with controlled addresses; Resend free tier is limited to 100 emails/day.
 
 Cloudflare quotas are account-wide, even with separate D1 databases. Keep total test traffic bounded and check the account before rerunning a large test.
+
+### Repeatable sweep runner
+
+Use the included PowerShell runner to execute identical VU stages, keep secrets only in the current
+shell session, show k6's live output during the recording, and save non-sensitive JSON/CSV summaries
+under ignored `load/results/`:
+
+```powershell
+$env:VENUEFLOW_CUSTOMER_TOKEN = 'fresh Clerk customer JWT'
+$env:VENUEFLOW_BENCHMARK_SECRET = 'the deployed benchmark secret'
+.\load\run-booking-sweep.ps1 -Target baseline
+.\load\run-booking-sweep.ps1 -Target optimized
+```
+
+The first failing baseline stage and the matching optimized stage are the video evidence. The saved
+p95 latency and failure percentage are the record of the actual run; no concurrency limit is claimed
+until these runs complete.
 
 ## Video checklist
 
