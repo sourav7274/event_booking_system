@@ -52,17 +52,17 @@ app.post('/api/v1/events/:eventId/bookings', requireAuth, requireRole('CUSTOMER'
   const idempotencyKey = c.req.header('Idempotency-Key');
   if (!idempotencyKey || idempotencyKey.length > 128) throw new AppError(400, 'INVALID_IDEMPOTENCY_KEY', 'An Idempotency-Key header of up to 128 characters is required.');
   const user = currentUser(c);
+  // Only the server-held benchmark secret can suppress delivery; normal app/API requests always send email.
+  const benchmarkSecret = c.env.BENCHMARK_SECRET;
+  const suppressEmail = Boolean(benchmarkSecret) && c.req.header('X-Benchmark-Secret') === benchmarkSecret;
   const existing = await findExistingBooking(c.env, user.clerkId, idempotencyKey);
   if (existing) return c.json({ data: existing, meta: { replayed: true } }, 200);
   const booking = c.env.APP_ENV === 'baseline'
-    ? await createBaselineBooking(c.env, user, c.req.param('eventId'), c.req.valid('json').quantity, idempotencyKey)
-    : await createOptimizedBooking(c.env, user, c.req.param('eventId'), c.req.valid('json').quantity, idempotencyKey);
-  if (c.req.header('X-Benchmark-Secret') && c.req.header('X-Benchmark-Secret') === c.env.BENCHMARK_SECRET) {
-    await c.env.DB.prepare(`UPDATE outbox SET payload = ? WHERE aggregate_id = ? AND type = 'BOOKING_CONFIRMATION' AND status = 'PENDING'`).bind(
-      JSON.stringify({ bookingId: booking.id, eventId: booking.event_id, customerId: booking.customer_id, benchmark: true }), booking.id,
-    ).run();
-  }
-  c.executionCtx.waitUntil(dispatchPendingOutbox(c.env));
+    ? await createBaselineBooking(c.env, user, c.req.param('eventId'), c.req.valid('json').quantity, idempotencyKey, suppressEmail)
+    : await createOptimizedBooking(c.env, user, c.req.param('eventId'), c.req.valid('json').quantity, idempotencyKey, suppressEmail);
+  // Synthetic benchmark requests exercise the booking API only. They do not
+  // create an outbox row or consume Queue operations; normal traffic does.
+  if (!suppressEmail) c.executionCtx.waitUntil(dispatchPendingOutbox(c.env));
   return c.json({ data: booking }, 201);
 });
 

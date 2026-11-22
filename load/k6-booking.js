@@ -32,6 +32,9 @@ export default function (data) {
       'X-Benchmark-Secret': benchmarkSecret,
     },
   });
+  if (response.status !== 201 && __VU === 1 && __ITER === 0) {
+    console.error(`First booking rejection: HTTP ${response.status} ${response.body}`);
+  }
   check(response, {
     'booking accepted': (r) => r.status === 201,
     'no unexpected error body': (r) => r.status !== 500 && r.status !== 503,
